@@ -1,7 +1,7 @@
-package com.dianping.midas.baymax.cabbie.node.node.udpconnector;
+package com.dianping.midas.baymax.cabbie.server.node.udpconnector;
 
 
-import com.dianping.midas.baymax.cabbie.node.node.ClientMessage;
+import com.dianping.midas.baymax.cabbie.server.node.ClientMessage;
 
 import java.net.SocketAddress;
 import java.net.SocketTimeoutException;

@@ -1,4 +1,4 @@
-package com.dianping.midas.baymax.cabbie.node.utils;
+package com.dianping.midas.baymax.cabbie.server.utils;
 
 import java.security.MessageDigest;
 import java.util.UUID;

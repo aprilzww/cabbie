@@ -17,10 +17,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 */
-package com.dianping.midas.baymax.cabbie.node.node;
+package com.dianping.midas.baymax.cabbie.server.node;
 
 
-import com.dianping.midas.baymax.cabbie.node.utils.StringUtil;
+import com.dianping.midas.baymax.cabbie.server.utils.StringUtil;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -49,7 +49,7 @@ public class NodeStatus {
                 //need to check again!!
                 if (global == null) {
                     global = new NodeStatus();
-                    System.out.println("try load node stat file...");
+                    System.out.println("try load server stat file...");
                     global.tryLoadFile();
                 }
             }

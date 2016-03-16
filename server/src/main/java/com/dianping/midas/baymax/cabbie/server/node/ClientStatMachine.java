@@ -17,13 +17,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 */
-package com.dianping.midas.baymax.cabbie.node.node;
+package com.dianping.midas.baymax.cabbie.server.node;
 
 
 
-import com.dianping.midas.baymax.cabbie.node.node.tcpconnector.MessengerTask;
-import com.dianping.midas.baymax.cabbie.node.node.weixinconnector.WeixinSender;
-import com.dianping.midas.baymax.cabbie.node.utils.PropertyUtil;
+import com.dianping.midas.baymax.cabbie.server.node.tcpconnector.MessengerTask;
+import com.dianping.midas.baymax.cabbie.server.utils.PropertyUtil;
 
 import java.lang.ref.WeakReference;
 import java.net.SocketAddress;

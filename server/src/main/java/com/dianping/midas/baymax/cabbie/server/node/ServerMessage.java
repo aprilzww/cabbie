@@ -17,7 +17,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 */
-package com.dianping.midas.baymax.cabbie.node.node;
+package com.dianping.midas.baymax.cabbie.server.node;
 
 import java.net.SocketAddress;
 
@@ -34,7 +34,7 @@ public final class ServerMessage {
         this.data = data;
     }
 
-//	public static org.ddpush.im.node.Message getNewInstance(){
+//	public static org.ddpush.im.server.Message getNewInstance(){
 //		return null;
 //	}
 

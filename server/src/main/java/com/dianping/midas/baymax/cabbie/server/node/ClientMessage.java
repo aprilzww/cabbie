@@ -17,26 +17,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 */
-package com.dianping.midas.baymax.cabbie.node.node;
+package com.dianping.midas.baymax.cabbie.server.node;
 
 
-import com.dianping.midas.baymax.cabbie.node.utils.StringUtil;
+import com.dianping.midas.baymax.cabbie.server.utils.StringUtil;
 
+import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 
-public final class PushMessage {
+/**
+ * 服务端接收消息
+ */
+public final class ClientMessage {
 
+    protected SocketAddress address;
     protected byte[] data;
 
-    public PushMessage(byte[] data) throws Exception {
-        if (data == null) {
-            throw new NullPointerException("data array is null");
-        }
+    public ClientMessage(SocketAddress address, byte[] data) throws Exception {
+        this.address = address;
         this.data = data;
-        if (checkFormat() == false) {
-            throw new java.lang.IllegalArgumentException("data format error");
-        }
     }
+
 
     public void setData(byte[] data) {
         this.data = data;
@@ -44,6 +45,14 @@ public final class PushMessage {
 
     public byte[] getData() {
         return this.data;
+    }
+
+    public SocketAddress getSocketAddress() {
+        return this.address;
+    }
+
+    public void setSocketAddress(SocketAddress addr) {
+        this.address = addr;
     }
 
     public int getVersionNum() {
@@ -56,7 +65,7 @@ public final class PushMessage {
         return b & 0xff;
     }
 
-    public int getContentLength() {
+    public int getDataLength() {
         return (int) ByteBuffer.wrap(data, 19, 2).getChar();
     }
 
@@ -65,6 +74,9 @@ public final class PushMessage {
     }
 
     public boolean checkFormat() {
+        if (this.data == null) {
+            return false;
+        }
         if (data.length < Constant.CLIENT_MESSAGE_MIN_LENGTH) {
             return false;
         }
@@ -73,13 +85,20 @@ public final class PushMessage {
         }
 
         int cmd = getCmd();
-        if (cmd != ClientStatMachine.CMD_0x10
+        if (cmd != ClientStatMachine.CMD_0x00
+                //&& cmd != ClientStatMachine.CMD_0x01
+                && cmd != ClientStatMachine.CMD_0x10
                 && cmd != ClientStatMachine.CMD_0x11
-                && cmd != ClientStatMachine.CMD_0x20) {
+                && cmd != ClientStatMachine.CMD_0x20
+                && cmd != ClientStatMachine.CMD_0xff) {
             return false;
         }
-        int dataLen = getContentLength();
+        int dataLen = getDataLength();
         if (data.length != dataLen + Constant.CLIENT_MESSAGE_MIN_LENGTH) {
+            return false;
+        }
+
+        if (cmd == ClientStatMachine.CMD_0x00 && dataLen != 0) {
             return false;
         }
 
@@ -91,7 +110,7 @@ public final class PushMessage {
             return false;
         }
 
-        if (cmd == ClientStatMachine.CMD_0x20 && dataLen < 1) {//must has content
+        if (cmd == ClientStatMachine.CMD_0x20 && dataLen != 0) {
             return false;
         }
 

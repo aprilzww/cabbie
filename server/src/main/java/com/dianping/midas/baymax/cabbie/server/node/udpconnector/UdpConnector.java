@@ -1,10 +1,10 @@
-package com.dianping.midas.baymax.cabbie.node.node.udpconnector;
+package com.dianping.midas.baymax.cabbie.server.node.udpconnector;
 
 
 
-import com.dianping.midas.baymax.cabbie.node.node.ClientMessage;
-import com.dianping.midas.baymax.cabbie.node.node.ServerMessage;
-import com.dianping.midas.baymax.cabbie.node.utils.PropertyUtil;
+import com.dianping.midas.baymax.cabbie.server.node.ClientMessage;
+import com.dianping.midas.baymax.cabbie.server.node.ServerMessage;
+import com.dianping.midas.baymax.cabbie.server.utils.PropertyUtil;
 
 import java.net.InetSocketAddress;
 import java.nio.channels.DatagramChannel;

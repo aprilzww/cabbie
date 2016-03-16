@@ -1,4 +1,4 @@
-package com.dianping.midas.baymax.cabbie.node.utils;
+package com.dianping.midas.baymax.cabbie.server.utils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

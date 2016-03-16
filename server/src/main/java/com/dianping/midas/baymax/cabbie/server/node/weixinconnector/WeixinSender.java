@@ -1,9 +1,9 @@
-package com.dianping.midas.baymax.cabbie.node.node.weixinconnector;
+package com.dianping.midas.baymax.cabbie.server.node.weixinconnector;
 
-import com.dianping.midas.baymax.cabbie.node.node.ServerMessage;
-import com.dianping.midas.baymax.cabbie.node.utils.DateTimeUtil;
-import com.dianping.midas.baymax.cabbie.node.utils.PropertyUtil;
-import com.dianping.midas.baymax.cabbie.node.utils.StringUtil;
+import com.dianping.midas.baymax.cabbie.server.node.ServerMessage;
+import com.dianping.midas.baymax.cabbie.server.utils.DateTimeUtil;
+import com.dianping.midas.baymax.cabbie.server.utils.PropertyUtil;
+import com.dianping.midas.baymax.cabbie.server.utils.StringUtil;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;

@@ -17,42 +17,41 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 */
-package com.dianping.midas.baymax.cabbie.node.node.tcpconnector;
+package com.dianping.midas.baymax.cabbie.server.node.pushlistener;
 
 
-
-import com.dianping.midas.baymax.cabbie.node.node.*;
-import com.dianping.midas.baymax.cabbie.node.utils.PropertyUtil;
+import com.dianping.midas.baymax.cabbie.server.node.ClientStatMachine;
+import com.dianping.midas.baymax.cabbie.server.node.Constant;
+import com.dianping.midas.baymax.cabbie.server.node.NodeStatus;
+import com.dianping.midas.baymax.cabbie.server.node.PushMessage;
 
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
-import java.util.ArrayList;
 
-/**
- * 信使任务线程
- */
-public class MessengerTask implements Runnable {
+public class PushTask implements Runnable {
 
-    private NIOTcpConnector listener;
+    private NIOPushListener listener;
     private SocketChannel channel;
     private SelectionKey key;
     private long lastActive;
     private boolean isCancel = false;
 
     private boolean writePending = false;
+//    private int maxContentLength;
+    private byte[] arrayBody;
+    private byte[] arrayHead;
+    private ByteBuffer headBuffer;//兼做响应 1byte
+    private ByteBuffer bodyBuffer;
 
-    private byte[] bufferArray;
-    private ByteBuffer buffer;
-
-    private java.util.LinkedList<ServerMessage> pendingEvents = null;
-
-    public MessengerTask(NIOTcpConnector listener, SocketChannel channel) {
+    public PushTask(NIOPushListener listener, SocketChannel channel) {
         this.listener = listener;
         this.channel = channel;
-        bufferArray = new byte[Constant.SERVER_MESSAGE_MIN_LENGTH + PropertyUtil.getPropertyInt("PUSH_MSG_MAX_CONTENT_LEN")];
-        buffer = ByteBuffer.wrap(bufferArray);
-        buffer.limit(Constant.CLIENT_MESSAGE_MIN_LENGTH);
+//        maxContentLength = PropertyUtil.getPropertyInt("PUSH_MSG_MAX_CONTENT_LEN");
+//        bufferArray = new byte[Constant.PUSH_MSG_HEADER_LEN + maxContentLength];
+        arrayHead = new byte[Constant.PUSH_MSG_HEADER_LEN];
+        headBuffer = ByteBuffer.wrap(arrayHead);
+//        buffer.limit(Constant.PUSH_MSG_HEADER_LEN);
         lastActive = System.currentTimeMillis();
     }
 
@@ -61,16 +60,13 @@ public class MessengerTask implements Runnable {
     }
 
     private void cancelKey(final SelectionKey key) {
-        if (this.isCancel == true) {
-            return;
-        }
+
         Runnable r = new Runnable() {
             public void run() {
                 listener.cancelKey(key);
             }
         };
         listener.addEvent(r);
-        this.isCancel = true;
     }
 
     private void registerForWrite(final SelectionKey key, final boolean needWrite) {
@@ -87,7 +83,6 @@ public class MessengerTask implements Runnable {
                 return;
             }
         }
-
 
         Runnable r = new Runnable() {
             public void run() {
@@ -119,29 +114,12 @@ public class MessengerTask implements Runnable {
         if (key == null) {
             return;
         }
-        if (this.isCancel == true) {//vic
+        if (isCancel == true) {
             return;
         }
         try {
-            if (writePending == false && buffer.position() == 0 && pendingEvents != null) {
-                ServerMessage sm = pendingEvents.poll();
-                if (sm == null) {
-                    registerForWrite(key, false);
-                    if (key.isReadable()) {
-                        //read pkg
-                        readReq();
-                    } else {
-                        // do nothing
-                    }
-                    return;
-                }
-                buffer.clear();
-                buffer.put(sm.getData());
-                buffer.flip();
-                this.writePending = true;
-                registerForWrite(key, true);
-                return;
-            } else if (writePending == false) {
+            if (writePending == false) {
+
                 if (key.isReadable()) {
                     //read pkg
                     readReq();
@@ -150,17 +128,22 @@ public class MessengerTask implements Runnable {
                 }
             } else {//has package
 
+                // try send pkg and place hasPkg=false
+                //
+                //register write ops if not enough buffer
                 //if(key.isWritable()){
                 writeRes();
                 //}
             }
         } catch (Exception e) {
             cancelKey(key);
+            isCancel = true;
         } catch (Throwable t) {
             cancelKey(key);
+            isCancel = true;
         }
 
-        //key = null;
+        key = null;
 
     }
 
@@ -169,25 +152,42 @@ public class MessengerTask implements Runnable {
             return;
         }
 
-        if (channel.read(buffer) < 0) {
+        if (channel.read(headBuffer) < 0) {
             throw new Exception("end of stream");
         }
         if (this.calcWritePending() == false) {
             return;
         } else {
-            processReq();
+            byte res = 0;
+            try {
+                processReq();
+            } catch (Exception e) {
+                res = 1;
+            } catch (Throwable t) {
+                res = -1;
+            }
+
+            headBuffer.clear();
+            headBuffer.limit(1);
+            headBuffer.put(res);
+            headBuffer.flip();
+
+            registerForWrite(key, true);
+
         }
+
 
         lastActive = System.currentTimeMillis();
     }
 
     private void writeRes() throws Exception {
-        if (buffer.hasRemaining()) {
-            channel.write(buffer);
+        if (headBuffer.hasRemaining()) {
+            channel.write(headBuffer);
         } else {
-            buffer.clear();
-            buffer.limit(Constant.CLIENT_MESSAGE_MIN_LENGTH);
+            headBuffer.clear();
+            headBuffer.limit(Constant.PUSH_MSG_HEADER_LEN);
             this.writePending = false;
+            registerForWrite(key, false);
         }
         lastActive = System.currentTimeMillis();
     }
@@ -202,27 +202,29 @@ public class MessengerTask implements Runnable {
 
     private synchronized boolean calcWritePending() throws Exception {
         if (this.writePending == false) {
-            if (buffer.position() < Constant.CLIENT_MESSAGE_MIN_LENGTH) {
+            if (headBuffer.position() < Constant.PUSH_MSG_HEADER_LEN) {
                 this.writePending = false;
             } else {
-                int bodyLen = (int) ByteBuffer.wrap(bufferArray, Constant.CLIENT_MESSAGE_MIN_LENGTH - 2, 2).getChar();
-                if (bodyLen > Constant.CLIENT_MESSAGE_MAX_LENGTH - Constant.CLIENT_MESSAGE_MIN_LENGTH) {
-                    throw new java.lang.IllegalArgumentException("content length is " + bodyLen + ", larger than the max of " + (Constant.CLIENT_MESSAGE_MAX_LENGTH - Constant.CLIENT_MESSAGE_MIN_LENGTH));
-                }
+                int bodyLen = (int) ByteBuffer.wrap(arrayHead, Constant.PUSH_MSG_HEADER_LEN - 2, 2).getChar();
+//                if (bodyLen > maxContentLength) {
+//                    throw new java.lang.IllegalArgumentException("content length " + bodyLen + " larger than max " + maxContentLength);
+//                }
                 if (bodyLen == 0) {
                     this.writePending = true;
                 } else {
-                    if (buffer.limit() != Constant.CLIENT_MESSAGE_MIN_LENGTH + bodyLen) {
-                        buffer.limit(Constant.CLIENT_MESSAGE_MIN_LENGTH + bodyLen);
+                    arrayBody = new byte[bodyLen];
+                    bodyBuffer = ByteBuffer.wrap(arrayBody);
+                    if (bodyBuffer.limit() != bodyLen) {
+                        bodyBuffer.limit(bodyLen);
                     } else {
-                        if (buffer.position() == Constant.CLIENT_MESSAGE_MIN_LENGTH + bodyLen) {
+                        if (bodyBuffer.position() == bodyLen) {
                             this.writePending = true;
                         }
                     }
                 }
             }
         } else {//this.writePending == true
-            if (buffer.hasRemaining()) {
+            if (bodyBuffer.hasRemaining()) {
                 this.writePending = true;
             } else {
                 this.writePending = false;
@@ -234,60 +236,33 @@ public class MessengerTask implements Runnable {
 
     private void processReq() throws Exception {
         //check and put data into nodeStat
-        //buffer.flip();
-        byte[] data = new byte[buffer.limit()];
-        System.arraycopy(bufferArray, 0, data, 0, buffer.limit());
-        buffer.clear();
-        this.writePending = false;//important
-        ClientMessage cm = new ClientMessage(null, data);
+        headBuffer.flip();
+        bodyBuffer.flip();
+        byte[] data = new byte[headBuffer.limit() + bodyBuffer.limit()];
+        System.arraycopy(arrayHead, 0, data, 0, headBuffer.limit());
+        System.arraycopy(arrayBody, 0, data, headBuffer.limit(), bodyBuffer.limit());
+        headBuffer.clear();
+        bodyBuffer.clear();
+        //this.writePending = false;//important
+        PushMessage pm = new PushMessage(data);
         NodeStatus nodeStat = NodeStatus.getInstance();
-        String uuid = cm.getUuidHexString();
+        String uuid = pm.getUuidHexString();
         ClientStatMachine csm = nodeStat.getClientStat(uuid);
-        if (csm == null) {//
-            csm = ClientStatMachine.newByClientTick(cm);
+        if (csm == null) {
+            csm = ClientStatMachine.newByPushReq(pm);
             if (csm == null) {
-                return;
+                throw new Exception("can not new state machine");
             }
             nodeStat.putClientStat(uuid, csm);
-        }
-        csm.setMessengerTask(this);
-        ArrayList<ServerMessage> smList = csm.onClientMessage(cm);
-        if (smList == null || smList.size() == 0) {
-            return;
+            csm.onPushMessage(pm);//可以发送微信消息
+        } else {
+            try {
+                csm.onPushMessage(pm);
+            } catch (Exception e) {
+            }
         }
 
-        for (int i = 0; i < smList.size(); i++) {
-            ServerMessage sm = smList.get(i);
-            this.pushInstanceMessage(sm);
-        }
 
     }
-
-    public void pushInstanceMessage(ServerMessage sm) {
-        if (sm == null || sm.getData() == null || sm.getData().length == 0) {
-            return;
-        }
-        if (this.channel == null || this.channel.isConnected() == false || this.channel.isRegistered() == false) {
-            return;
-        }
-        if (this.isCancel == true) {
-            return;
-        }
-        if (this.pendingEvents == null) {
-            this.pendingEvents = new java.util.LinkedList<ServerMessage>();
-        }
-        this.pendingEvents.add(sm);
-        if (key != null) {
-            this.registerForWrite(key, true);
-            key.selector().wakeup();
-        }
-    }
-
-//	private ServerMessage pollInstanceMessage(){
-//		if(this.pendingEvents == null){
-//			return null;
-//		}
-//		return this.pendingEvents.poll();
-//	}
 
 }

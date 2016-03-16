@@ -17,10 +17,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 */
-package com.dianping.midas.baymax.cabbie.node.node.tcpconnector;
+package com.dianping.midas.baymax.cabbie.server.node.pushlistener;
 
-import org.ddpush.im.util.PropertyUtil;
-import org.ddpush.im.util.StringUtil;
+
+
+import com.dianping.midas.baymax.cabbie.server.utils.PropertyUtil;
+import com.dianping.midas.baymax.cabbie.server.utils.StringUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -32,12 +36,12 @@ import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * 客户端TCP连接器
- */
-public class NIOTcpConnector implements Runnable {
-    private static int sockTimout = 1000 * PropertyUtil.getPropertyInt("CLIENT_TCP_SOCKET_TIMEOUT");
-    private static int port = PropertyUtil.getPropertyInt("CLIENT_TCP_PORT");
+
+public class NIOPushListener implements Runnable {
+    private static final Logger logger = LoggerFactory.getLogger(NIOPushListener.class);
+
+    private static int sockTimout = 1000 * PropertyUtil.getPropertyInt("PUSH_LISTENER_SOCKET_TIMEOUT");
+    private static int port = PropertyUtil.getPropertyInt("PUSH_LISTENER_PORT");
 
     private boolean stoped = false;
 
@@ -46,8 +50,8 @@ public class NIOTcpConnector implements Runnable {
 
     private ExecutorService executor;
 
-    private int minThreads = PropertyUtil.getPropertyInt("CLIENT_TCP_MIN_THREAD");
-    private int maxThreads = PropertyUtil.getPropertyInt("CLIENT_TCP_MAX_THREAD");
+    private int minThreads = PropertyUtil.getPropertyInt("PUSH_LISTENER_MIN_THREAD");
+    private int maxThreads = PropertyUtil.getPropertyInt("PUSH_LISTENER_MAX_THREAD");
 
     protected ConcurrentLinkedQueue<Runnable> events = new ConcurrentLinkedQueue<Runnable>();
 
@@ -62,10 +66,10 @@ public class NIOTcpConnector implements Runnable {
         channel = ServerSocketChannel.open();
         channel.socket().bind(new InetSocketAddress(port));
         channel.configureBlocking(false);
-        System.out.println("nio tcp connector port:" + port);
+
         selector = Selector.open();
         channel.register(selector, SelectionKey.OP_ACCEPT);
-        System.out.println("NIO TCP Connector nio provider: " + selector.provider().getClass().getCanonicalName());
+        logger.info("NIO TCP Push Listener nio provider: " + selector.provider().getClass().getCanonicalName());
     }
 
     public void initExecutor() throws Exception {
@@ -74,22 +78,18 @@ public class NIOTcpConnector implements Runnable {
         }
     }
 
-    public void wakeupSelector() {
-        if (this.selector == null) return;
-        try {
-            selector.wakeup();
-        } catch (Exception e) {
-        }
-    }
-
     public void addEvent(Runnable event) {
         if (selector == null) {
             return;
         }
+
         events.add(event);
+
         if (stoped == false && selector != null) {
             selector.wakeup();
         }
+
+
     }
 
     @Override
@@ -97,12 +97,10 @@ public class NIOTcpConnector implements Runnable {
         try {
             init();
         } catch (Exception e) {
-            e.printStackTrace();
+           logger.error("PushListener init error!",e);
             System.exit(1);
         }
-        synchronized (this) {
-            this.notifyAll();
-        }
+        logger.info("push listener port:" + this.port);
 
         while (!stoped && selector != null) {
             try {
@@ -111,7 +109,7 @@ public class NIOTcpConnector implements Runnable {
                 handleChannel();
             } catch (java.nio.channels.ClosedSelectorException cse) {
                 //
-            } catch (java.nio.channels.CancelledKeyException cke) {
+            } catch (java.nio.channels.CancelledKeyException nx) {
                 //
             } catch (Exception e) {
                 e.printStackTrace();
@@ -138,7 +136,7 @@ public class NIOTcpConnector implements Runnable {
 
     private void stopExecutor() {
         try {
-            if (executor != null) executor.shutdownNow();
+            if (executor != null) executor.shutdownNow();//ignore left overs
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -182,7 +180,7 @@ public class NIOTcpConnector implements Runnable {
         }
         Iterator it = keys.iterator();
         long now = System.currentTimeMillis();
-        //cancel timeout and no interestOps keys,close socket and channel
+        //cancel timeout and no interestOps key,close socket and channel
         while (it.hasNext()) {
             SelectionKey key = (SelectionKey) it.next();
             if (key.channel() instanceof ServerSocketChannel) {
@@ -195,12 +193,12 @@ public class NIOTcpConnector implements Runnable {
 //        		if(key.interestOps() != 0){
 //        			continue;
 //        		}
-                MessengerTask task = (MessengerTask) key.attachment();
+                PushTask task = (PushTask) key.attachment();
                 if (task == null) {
                     cancelKey(key);
                     continue;
                 }
-                if (task.isWritePending() == false && now - task.getLastActive() > sockTimout) {
+                if (task.isWritePending() == false && now - task.getLastActive() > sockTimout) {//客户端agent 10min没活动则断开
                     cancelKey(key);
                 }
             } catch (CancelledKeyException e) {
@@ -232,7 +230,7 @@ public class NIOTcpConnector implements Runnable {
                     channel.socket().setSoTimeout(sockTimout);
                     //channel.socket().setReceiveBufferSize(1024);
                     //channel.socket().setSendBufferSize(1024);
-                    MessengerTask task = new MessengerTask(this, channel);
+                    PushTask task = new PushTask(this, channel);
                     channel.register(selector, SelectionKey.OP_READ, task);
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -241,7 +239,7 @@ public class NIOTcpConnector implements Runnable {
 
             if (key.isReadable() || key.isWritable()) {
                 try {
-                    MessengerTask task = (MessengerTask) key.attachment();
+                    PushTask task = (PushTask) key.attachment();
                     if (task == null) {//this should never happen
                         cancelKey(key);
                         continue;
@@ -283,51 +281,29 @@ public class NIOTcpConnector implements Runnable {
 
             public void run() {
                 try {
-                    Socket s = new Socket("localhost", PropertyUtil.getPropertyInt("CLIENT_TCP_PORT"));
+                    Socket s = new Socket("localhost", PropertyUtil.getPropertyInt("Constant.PUSH_LISTENER_PORT"));
                     s.setSoTimeout(0);
                     InputStream in = s.getInputStream();
                     OutputStream out = s.getOutputStream();
 
                     //for(int i = 600000; i< 700000; i++){
-                    while (true) {
-                        int key = cnt.addAndGet(1);
-                        if (key > 14999) {
-                            break;
-                        }
-                        out.write(1);
-                        out.write(1);
-                        out.write(0);
-                        out.write(StringUtil.md5Byte("" + key));
-                        out.write(0);
-                        out.write(0);
-                        out.flush();
-
-                        long lastA = System.currentTimeMillis();
-
-                        byte[] b = new byte[1];
-                        int read = -1;
-                        while ((read = in.read(b)) >= 0) {
-                            if (read == 0) {
-                                try {
-                                    Thread.sleep(1);
-                                } catch (Exception e) {
-                                }
-                                continue;
-                            }
-                            if (System.currentTimeMillis() - lastA > 60 * 1000) {
-                                out.write(1);
-                                out.write(1);
-                                out.write(0);
-                                out.write(StringUtil.md5Byte("" + key));
-                                out.write(0);
-                                out.write(0);
-                                out.flush();
-                            }
-
-                            System.out.print(StringUtil.convert(b));
-                        }
-
+                    //while(true){
+                    int key = cnt.addAndGet(1);
+                    if (key > 10000) {
+                        return;
                     }
+                    out.write(1);
+                    out.write(1);
+                    out.write(16);
+                    out.write(StringUtil.md5Byte("" + key));
+                    out.write(0);
+                    out.write(0);
+                    out.flush();
+
+                    byte[] b = new byte[1];
+                    int read = in.read(b);
+                    System.out.println(b[0]);
+                    //	}
 //					while(true){
 //						int read = in.read(b);
 //						System.out.println(b[0]);
@@ -348,8 +324,8 @@ public class NIOTcpConnector implements Runnable {
             }
         }
 
-        Thread[] worker = new Thread[100];
-        AtomicInteger cnt = new AtomicInteger(4999);
+        Thread[] worker = new Thread[10000];
+        AtomicInteger cnt = new AtomicInteger(-1);
         for (int i = 0; i < worker.length; i++) {
             Thread t = new Thread(new test(cnt));
             worker[i] = t;
@@ -357,7 +333,7 @@ public class NIOTcpConnector implements Runnable {
         for (int i = 0; i < worker.length; i++) {
             worker[i].start();
             try {
-                Thread.sleep(10);
+                Thread.sleep(2);
             } catch (Exception e) {
             }
         }
